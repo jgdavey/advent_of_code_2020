@@ -1,16 +1,16 @@
-use std::ops::RangeInclusive;
 use std::fs::read_to_string;
 
 #[derive(Debug)]
 struct Rule {
     char: char,
-    rng: RangeInclusive<usize>
+    positions: Vec<usize>
 }
 
 impl Rule {
     fn check(&self, input: &str) -> bool {
-        let num = input.matches(self.char).count();
-        self.rng.contains(&num)
+        let indexed: Vec<_> = self.positions.iter().map(|&p| input[p-1..].chars().next()).collect();
+        let count = indexed.iter().filter(|&o| *o == Some(self.char)).count();
+        count == 1
     }
 }
 
@@ -28,14 +28,13 @@ impl Input {
         let mid = before.find(' ')?;
         let (range, c) = before.split_at(mid);
 
-        let mut r = range.splitn(2, '-');
-        let from: usize = r.next()?.parse().ok()?;
-        let to: usize = r.next()?.parse().ok()?;
+        let result: Result<Vec<_>, _> = range.splitn(2, '-').map(|s| s.parse()).collect();
+        let positions = result.ok()?;
         Some(
             Input {
                 rule: Rule {
                     char: c.trim().chars().next()?,
-                    rng: from..=to
+                    positions
                 },
                 password: after[1..].trim().to_string()
             }
@@ -74,9 +73,11 @@ mod tests {
 
     #[test]
     fn test_input_valid() {
-        assert!(input_valid("2-9 c: ccccccccc"));
+        assert!(!input_valid("2-9 c: ccccccccc"));
         assert!(!input_valid("2-8 c: ccccccccc"));
         assert!(!input_valid("1-3 b: cdefg"));
+        assert!(input_valid("1-3 b: bdefg"));
+        assert!(!input_valid("1-3 b: bdbfg"));
     }
 }
 
