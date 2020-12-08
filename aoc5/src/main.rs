@@ -2,10 +2,8 @@ pub fn decode(seat: &str) -> usize {
     let binary: String = seat
         .chars()
         .map(|c| match c {
-            'B' => '1',
-            'F' => '0',
-            'L' => '0',
-            'R' => '1',
+            'B' | 'R' => '1',
+            'F' | 'L' => '0',
             _ => c,
         })
         .collect();
@@ -17,9 +15,9 @@ fn main() {
     let mut seat_ids: Vec<_> = input.lines().map(decode).collect();
     seat_ids.sort();
     for (i, seat) in seat_ids.iter().skip(1).enumerate() {
-        let prev = seat_ids[i];
-        if seat - prev > 1 {
-            print!("Seat: {}, Prev: {}", seat, prev);
+        if seat - seat_ids[i] > 1 {
+            print!("Seat: {}", seat - 1);
+            break;
         }
     }
 }
