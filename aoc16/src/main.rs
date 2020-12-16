@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::ops::RangeInclusive;
 use std::str::FromStr;
 
@@ -8,12 +9,24 @@ fn main() {
         "Error rate: {:?}",
         station.error_codes().iter().sum::<usize>()
     );
+
+    let my_ticket = station.my_ticket();
+
+    println!("Solved: {:#?}", my_ticket);
+
+    let product: usize = my_ticket
+        .iter()
+        .filter(|(k, _)| k.starts_with("departure"))
+        .map(|(_, v)| v)
+        .product();
+
+    println!("Departure product: {:?}", product);
 }
 
 type Number = usize;
 type Ticket = Vec<Number>;
 
-#[derive(Debug)]
+#[derive(Debug, Hash, PartialEq, Eq)]
 struct Rule {
     name: String,
     ranges: Vec<RangeInclusive<Number>>,
@@ -101,11 +114,73 @@ impl Station {
             .flatten()
             .collect()
     }
+
+    /// Returns list of (field, Set<rule idx>) tuples
+    fn possibilities(&self) -> Vec<(usize, HashSet<usize>)> {
+        let valid_tickets: Vec<_> = self
+            .nearby_tickets
+            .iter()
+            .filter(|ticket| self.errors_for_ticket(ticket).is_empty())
+            .collect();
+        let mut possibilities = vec![];
+        for field in 0..valid_tickets[0].len() {
+            let rules = self
+                .rules
+                .iter()
+                .enumerate()
+                .filter(|(_, rule)| valid_tickets.iter().all(|t| rule.is_valid(t[field])))
+                .map(|(idx, _)| idx)
+                .collect();
+            possibilities.push((field, rules));
+        }
+        possibilities
+    }
+
+    /// Returns Rules in field order
+    fn solve(&self) -> Vec<&Rule> {
+        let mut possibilities = self.possibilities();
+        possibilities.sort_by_key(|(_, r)| r.len());
+
+        // assume a single solution
+        let mut assigned = HashSet::new();
+        let mut solved = vec![];
+        for (field, rules) in possibilities {
+            let diff: HashSet<_> = rules.difference(&assigned).cloned().collect();
+            if diff.len() != 1 {
+                panic!("I dunno");
+            }
+            let rule = diff.iter().next().unwrap();
+            assigned.insert(*rule);
+            solved.push((field, *rule));
+        }
+        solved.sort_by_key(|&(field, _)| field);
+        solved.iter().map(|&(_, rule)| &self.rules[rule]).collect()
+    }
+
+    fn my_ticket(&self) -> HashMap<String, usize> {
+        self.solve()
+            .iter()
+            .enumerate()
+            .map(|(field, rule)| (rule.name.clone(), self.my_ticket[field]))
+            .collect()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    macro_rules! set {
+        ( $( $x:expr ),* ) => {  // Match zero or more comma delimited items
+            {
+                let mut temp_set = HashSet::new();  // Create a mutable HashSet
+                $(
+                    temp_set.insert($x); // Insert each item matched into the HashSet
+                )*
+                    temp_set // Return the populated HashSet
+            }
+        };
+    }
 
     #[test]
     fn test_part_1() {
@@ -123,7 +198,37 @@ mod tests {
                      38,6,12";
 
         let station: Station = input.parse().unwrap();
-        println!("{:?}", station);
         assert_eq!(station.error_codes(), vec![4, 55, 12]);
+    }
+
+    #[test]
+    fn test_part_2() {
+        let input = "class: 0-1 or 4-19\n\
+                     row: 0-5 or 8-19\n\
+                     seat: 0-13 or 16-19\n\
+                     \n\
+                     your ticket:\n\
+                     11,12,13\n\
+                     \n\
+                     nearby tickets:\n\
+                     3,9,18\n\
+                     15,1,5\n\
+                     5,14,9";
+        let station: Station = input.parse().unwrap();
+        let class = Rule {
+            name: "class".to_string(),
+            ranges: vec![0..=1, 4..=19],
+        };
+        let row = Rule {
+            name: "row".to_string(),
+            ranges: vec![0..=5, 8..=19],
+        };
+        let seat = Rule {
+            name: "seat".to_string(),
+            ranges: vec![0..=13, 16..=19],
+        };
+        let expected = vec![(0, set! {1}), (1, set! {0, 1}), (2, set! {0, 1, 2})];
+        assert_eq!(station.possibilities(), expected);
+        assert_eq!(station.solve(), vec![&row, &class, &seat]);
     }
 }
