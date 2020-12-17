@@ -25,13 +25,13 @@ impl fmt::Display for Cell {
     }
 }
 
-type Coordinate = (isize, isize, isize);
+type Coordinate = (isize, isize, isize, isize);
 
-struct Grid3d {
+struct Grid4d {
     cells: HashMap<Coordinate, Cell>,
 }
 
-impl FromStr for Grid3d {
+impl FromStr for Grid4d {
     type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -43,11 +43,11 @@ impl FromStr for Grid3d {
                     '#' => Cell::Active,
                     _ => return Err("Invalid character in grid"),
                 };
-                // initial z is always 0
-                cells.insert((0, y as isize, x as isize), cell);
+                // initial w, z is always 0
+                cells.insert((0, 0, y as isize, x as isize), cell);
             }
         }
-        Ok(Grid3d { cells })
+        Ok(Grid4d { cells })
     }
 }
 
@@ -61,16 +61,18 @@ fn min_max_bounds<T: Ord + Default + Copy>(mut v: Vec<T>) -> RangeInclusive<T> {
     RangeInclusive::new(min, max)
 }
 
-fn neighbors((z, y, x): Coordinate) -> Vec<Coordinate> {
+fn neighbors((w, z, y, x): Coordinate) -> Vec<Coordinate> {
     lazy_static! {
         static ref OFFSETS: Vec<Coordinate> = {
             let mut offsets = vec![];
-            for z in -1..=1 {
-                for y in -1..=1 {
-                    for x in -1..=1 {
-                        let coord = (z, y, x);
-                        if coord != (0, 0, 0) {
-                            offsets.push(coord);
+            for w in -1..=1 {
+                for z in -1..=1 {
+                    for y in -1..=1 {
+                        for x in -1..=1 {
+                            let coord = (w, z, y, x);
+                            if coord != (0, 0, 0, 0) {
+                                offsets.push(coord);
+                            }
                         }
                     }
                 }
@@ -81,36 +83,39 @@ fn neighbors((z, y, x): Coordinate) -> Vec<Coordinate> {
 
     OFFSETS
         .iter()
-        .map(|(dz, dy, dx)| (z + dz, y + dy, x + dx))
+        .map(|(dw, dz, dy, dx)| (w + dw, z + dz, y + dy, x + dx))
         .collect()
 }
 
-impl Grid3d {
+impl Grid4d {
     fn bounds(
         &self,
     ) -> (
         RangeInclusive<isize>,
         RangeInclusive<isize>,
         RangeInclusive<isize>,
+        RangeInclusive<isize>,
     ) {
+        let mut ws = vec![];
         let mut zs = vec![];
         let mut ys = vec![];
         let mut xs = vec![];
-        for &(z, y, x) in self.cells.keys() {
+        for &(w, z, y, x) in self.cells.keys() {
+            ws.push(w);
             zs.push(z);
             ys.push(y);
             xs.push(x);
         }
-        (min_max_bounds(zs), min_max_bounds(ys), min_max_bounds(xs))
+        (min_max_bounds(ws), min_max_bounds(zs), min_max_bounds(ys), min_max_bounds(xs))
     }
 
-    fn to_string(&self, z: isize) -> String {
-        let (_, ys, xs) = self.bounds();
+    fn to_string(&self, w: isize, z: isize) -> String {
+        let (_, _, ys, xs) = self.bounds();
         let out = ys
             .map(|y| {
                 xs.clone()
                     .map(|x| {
-                        self.cell_at((z, y, x)).to_char()
+                        self.cell_at((w, z, y, x)).to_char()
                     })
                     .collect::<String>()
             })
@@ -128,10 +133,13 @@ impl Grid3d {
     }
 
     fn tick(&mut self) {
-        let (bz, by, bx) = self.bounds();
+        let (bw, bz, by, bx) = self.bounds();
 
-        let outer_cells = self.cells.keys().filter(|&(z, y, x)| {
-            z == bz.start() || z == bz.end() || y == by.start() || y == by.end() || x == bx.start() || x == bx.end()
+        let outer_cells = self.cells.keys().filter(|&(w, z, y, x)| {
+            w == bw.start() || w == bw.end() ||
+                z == bz.start() || z == bz.end() ||
+                y == by.start() || y == by.end() ||
+                x == bx.start() || x == bx.end()
         }).cloned().collect::<Vec<Coordinate>>();
 
 
@@ -168,14 +176,14 @@ impl Grid3d {
 
 fn main() {
     let input = std::fs::read_to_string("input.txt").unwrap();
-    let mut grid: Grid3d = input.parse().unwrap();
+    let mut grid: Grid4d = input.parse().unwrap();
 
     for i in 1..=6 {
         grid.tick();
         println!("After round {}, {} are active", i, grid.active_count());
     }
 
-    println!("z=0\n{}", grid.to_string(0));
+    println!("w=0, z=0\n{}", grid.to_string(0, 0));
 }
 
 #[cfg(test)]
@@ -187,9 +195,9 @@ mod tests {
         let input = ".#.\n\
                      ..#\n\
                      ###";
-        let grid: Grid3d = input.parse().unwrap();
-        assert_eq!(grid.bounds(), (0..=0, 0..=2, 0..=2));
-        assert_eq!(grid.to_string(0), input);
+        let grid: Grid4d = input.parse().unwrap();
+        assert_eq!(grid.bounds(), (0..=0, 0..=0, 0..=2, 0..=2));
+        assert_eq!(grid.to_string(0, 0), input);
     }
 
     #[test]
@@ -197,19 +205,19 @@ mod tests {
         let input = ".#.\n\
                      ..#\n\
                      ###";
-        let mut grid: Grid3d = input.parse().unwrap();
+        let mut grid: Grid4d = input.parse().unwrap();
 
-        assert_eq!(grid.cell_at((0, 0, 0)), Cell::Inactive);
-        assert_eq!(grid.cell_at((0, 0, 1)), Cell::Active);
-        assert_eq!(grid.cell_at((0, 0, 2)), Cell::Inactive);
+        assert_eq!(grid.cell_at((0, 0, 0, 0)), Cell::Inactive);
+        assert_eq!(grid.cell_at((0, 0, 0, 1)), Cell::Active);
+        assert_eq!(grid.cell_at((0, 0, 0, 2)), Cell::Inactive);
 
-        assert_eq!(grid.cell_at((0, 1, 0)), Cell::Inactive);
-        assert_eq!(grid.cell_at((0, 1, 1)), Cell::Inactive);
-        assert_eq!(grid.cell_at((0, 1, 2)), Cell::Active);
+        assert_eq!(grid.cell_at((0, 0, 1, 0)), Cell::Inactive);
+        assert_eq!(grid.cell_at((0, 0, 1, 1)), Cell::Inactive);
+        assert_eq!(grid.cell_at((0, 0, 1, 2)), Cell::Active);
 
-        assert_eq!(grid.cell_at((0, 2, 0)), Cell::Active);
-        assert_eq!(grid.cell_at((0, 2, 1)), Cell::Active);
-        assert_eq!(grid.cell_at((0, 2, 2)), Cell::Active);
+        assert_eq!(grid.cell_at((0, 0, 2, 0)), Cell::Active);
+        assert_eq!(grid.cell_at((0, 0, 2, 1)), Cell::Active);
+        assert_eq!(grid.cell_at((0, 0, 2, 2)), Cell::Active);
 
         // If a cube is active and exactly 2 or 3 of its neighbors are
         // also active, the cube remains active. Otherwise, the cube
@@ -221,21 +229,21 @@ mod tests {
 
         grid.tick();
 
-        assert_eq!(grid.cell_at((0, 0, 0)), Cell::Inactive);
-        assert_eq!(grid.cell_at((0, 0, 1)), Cell::Inactive);
-        assert_eq!(grid.cell_at((0, 0, 2)), Cell::Inactive);
+        assert_eq!(grid.cell_at((0, 0, 0, 0)), Cell::Inactive);
+        assert_eq!(grid.cell_at((0, 0, 0, 1)), Cell::Inactive);
+        assert_eq!(grid.cell_at((0, 0, 0, 2)), Cell::Inactive);
 
-        assert_eq!(grid.cell_at((0, 1, 0)), Cell::Active);
-        assert_eq!(grid.cell_at((0, 1, 1)), Cell::Inactive);
-        assert_eq!(grid.cell_at((0, 1, 2)), Cell::Active);
+        assert_eq!(grid.cell_at((0, 0, 1, 0)), Cell::Active);
+        assert_eq!(grid.cell_at((0, 0, 1, 1)), Cell::Inactive);
+        assert_eq!(grid.cell_at((0, 0, 1, 2)), Cell::Active);
 
-        assert_eq!(grid.cell_at((0, 2, 0)), Cell::Inactive);
-        assert_eq!(grid.cell_at((0, 2, 1)), Cell::Active);
-        assert_eq!(grid.cell_at((0, 2, 2)), Cell::Active);
+        assert_eq!(grid.cell_at((0, 0, 2, 0)), Cell::Inactive);
+        assert_eq!(grid.cell_at((0, 0, 2, 1)), Cell::Active);
+        assert_eq!(grid.cell_at((0, 0, 2, 2)), Cell::Active);
 
         for _ in 1..6 {
             grid.tick();
         }
-        assert_eq!(grid.active_count(), 112);
+        assert_eq!(grid.active_count(), 848);
     }
 }
