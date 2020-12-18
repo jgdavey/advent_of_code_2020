@@ -8,9 +8,10 @@ use nom::{
     IResult,
 };
 
+use std::fmt;
 use std::str::FromStr;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 enum Term {
     Number(isize),
     Add,
@@ -19,23 +20,30 @@ enum Term {
 }
 
 impl Term {
-    fn solve(&self) -> isize {
+    fn solve_simple(&self) -> isize {
         match self {
             Term::Number(i) => *i,
-            Term::SubExpr(e) => e.solve(),
+            Term::SubExpr(e) => e.solve_simple(),
             _ => unimplemented!(),
+        }
+    }
+
+    fn addition_precedence(&self) -> Self {
+        match self {
+            Term::SubExpr(expr) => Term::SubExpr(expr.addition_precedence()),
+            e => e.clone(),
         }
     }
 }
 
-impl FromStr for Term {
-    type Err = &'static str;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.chars().next().ok_or("Can't parse empty")? {
-            '*' => Ok(Term::Multiply),
-            '+' => Ok(Term::Add),
-            '(' => unimplemented!(),
-            _ => Ok(Term::Number(s.parse().map_err(|_| "Illegal number")?)),
+impl fmt::Display for Term {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        use Term::*;
+        match self {
+            Number(n) => write!(f, "{}", n),
+            Add => write!(f, "+"),
+            Multiply => write!(f, "*"),
+            SubExpr(e) => write!(f, "({})", e),
         }
     }
 }
@@ -76,7 +84,7 @@ fn parse_expr(i: &str) -> IResult<&str, Expr> {
     map(many1(parse_term), Expr)(i)
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 struct Expr(Vec<Term>);
 
 impl FromStr for Expr {
@@ -89,15 +97,28 @@ impl FromStr for Expr {
     }
 }
 
+impl fmt::Display for Expr {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        for (i, term) in self.0.iter().enumerate() {
+            if i == 0 {
+                write!(f, "{}", term)?;
+            } else {
+                write!(f, " {}", term)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 impl Expr {
-    fn solve(&self) -> isize {
+    fn solve_simple(&self) -> isize {
         let mut terms = self.0.iter();
 
-        let mut acc = terms.next().map(|t| t.solve()).unwrap_or(0);
+        let mut acc = terms.next().map(|t| t.solve_simple()).unwrap_or(0);
 
         while let Some(op) = terms.next() {
             if let Some(term) = terms.next() {
-                let number = term.solve();
+                let number = term.solve_simple();
                 match op {
                     Term::Add => acc += number,
                     Term::Multiply => acc *= number,
@@ -109,16 +130,51 @@ impl Expr {
         }
         acc
     }
+
+    fn addition_precedence(&self) -> Expr {
+        let mut exprs = vec![];
+        let mut i = 0;
+        while i < self.0.len() {
+            match &self.0[i] {
+                Term::Add => {
+                    let prev = exprs.pop().unwrap();
+                    let add = Term::SubExpr(Expr(vec![
+                        prev,
+                        Term::Add,
+                        self.0[i + 1].addition_precedence(),
+                    ]));
+                    exprs.push(add);
+                    i += 1;
+                }
+                expr => exprs.push(expr.addition_precedence()),
+            }
+            i += 1;
+        }
+        Expr(exprs)
+    }
+
+    fn solve_advanced(&self) -> isize {
+        let rewritten = self.addition_precedence();
+        rewritten.solve_simple()
+    }
 }
 
 fn main() {
     let input = std::fs::read_to_string("input.txt").unwrap();
+
     let mut sum = 0;
     for line in input.lines() {
         let expr: Expr = line.parse().unwrap();
-        sum += expr.solve();
+        sum += expr.solve_simple();
     }
-    println!("Total sum: {}", sum);
+    println!("Part 1 total sum: {}", sum);
+
+    let mut sum = 0;
+    for line in input.lines() {
+        let expr: Expr = line.parse().unwrap();
+        sum += expr.solve_advanced();
+    }
+    println!("Part 2 total sum: {}", sum);
 }
 
 #[cfg(test)]
@@ -166,14 +222,45 @@ mod tests {
     fn test_solve_expression() {
         let input = "2 * 3 + (4 * 5)";
         let expr: Expr = input.parse().unwrap();
-        assert_eq!(expr.solve(), 26);
+        assert_eq!(expr.solve_simple(), 26);
 
         let input = "5 + (8 * 3 + 9 + 3 * 4 * 3)";
         let expr: Expr = input.parse().unwrap();
-        assert_eq!(expr.solve(), 437);
+        assert_eq!(expr.solve_simple(), 437);
 
         let input = "((2 + 4 * 9) * (6 + 9 * 8 + 6) + 6) + 2 + 4 * 2";
         let expr: Expr = input.parse().unwrap();
-        assert_eq!(expr.solve(), 13632);
+        assert_eq!(expr.solve_simple(), 13632);
+    }
+
+    #[test]
+    fn test_solve_advanced() {
+        let expr: Expr = "2 * 3 + (4 * 5)".parse().unwrap();
+        assert_eq!(expr.solve_advanced(), 46);
+
+        let expr: Expr = "5 + (8 * 3 + 9 + 3 * 4 * 3)".parse().unwrap();
+        assert_eq!(expr.solve_advanced(), 1445);
+
+        let expr: Expr = "5 * 9 * (7 * 3 * 3 + 9 * 3 + (8 + 6 * 4))".parse().unwrap();
+        assert_eq!(expr.solve_advanced(), 669060);
+        //((2 + 4 * 9) * (6 + 9 * 8 + 6) + 6) + 2 + 4 * 2 becomes 13632.
+    }
+
+    #[test]
+    fn test_addition_rewrite() {
+        let expr: Expr = "2 * 3 + 4 * 5".parse().unwrap();
+        assert_eq!(format!("{}", expr.addition_precedence()), "2 * (3 + 4) * 5");
+
+        let expr: Expr = "2 * 3 + (4 * 5)".parse().unwrap();
+        assert_eq!(
+            format!("{}", expr.addition_precedence()),
+            "2 * (3 + (4 * 5))"
+        );
+
+        let expr: Expr = "2 * 3 + (4 * 6 + 5)".parse().unwrap();
+        assert_eq!(
+            format!("{}", expr.addition_precedence()),
+            "2 * (3 + (4 * (6 + 5)))"
+        );
     }
 }
