@@ -1,17 +1,33 @@
-use std::collections::VecDeque;
+use std::collections::HashMap;
 use std::str::FromStr;
+
+fn string_to_vec(s: &str) -> Result<Vec<usize>, &'static str> {
+    s.chars()
+        .map(|c| c.to_string().parse::<usize>().map_err(|_| "bad number"))
+        .collect::<Result<Vec<usize>, _>>()
+}
 
 fn main() {
     let input = "167248359";
-    let mut game: Game = input.parse().unwrap();
+    let mut game = Game::new(string_to_vec(input).unwrap(), 9);
     for _ in 1..=100 {
         game.perform();
     }
-    println!("{}", game.circle());
+    let next = game.next(&1, 9);
+    println!("{:?} => product {}", next, next.iter().product::<usize>());
+
+    let mut game = Game::new(string_to_vec(input).unwrap(), 1_000_000);
+    for _ in 1..=10_000_000 {
+        game.perform();
+    }
+
+    let next = game.next(&1, 2);
+    println!("{:?} => product {}", next, next.iter().product::<usize>());
 }
 
 struct Game {
-    cups: VecDeque<usize>,
+    current: usize,
+    cups: HashMap<usize, usize>,
 }
 
 impl FromStr for Game {
@@ -20,53 +36,73 @@ impl FromStr for Game {
         let cups = s
             .chars()
             .map(|c| c.to_string().parse::<usize>().map_err(|_| "bad number"))
-            .collect::<Result<VecDeque<usize>, _>>()?;
-        Ok(Game { cups })
+            .collect::<Result<Vec<usize>, _>>()?;
+        Ok(Game::new(cups, 9))
     }
 }
 
 impl Game {
-    fn perform(&mut self) {
-        let mut circle = self.cups.clone();
-        let len = circle.len();
-        let decrement = move |c: usize| {
-            if c == 1 {
-                len
-            } else {
-                c - 1
-            }
-        };
-        let cup = circle.front().unwrap().clone();
-        let mut target = cup;
-        circle.rotate_left(1);
-        let mut rest = circle.split_off(3);
-        let mut found = None;
-
-        while let None = found {
-            target = decrement(target);
-            found = rest
-                .iter()
-                .enumerate()
-                .find(|(_, &c)| c == target)
-                .map(|(i, _)| i);
+    fn new(initial: Vec<usize>, target_size: usize) -> Self {
+        let current = initial.first().unwrap().clone();
+        let mut cups = HashMap::with_capacity(target_size);
+        for s in initial.windows(2) {
+            cups.insert(s[0], s[1]);
         }
+        let biggest = initial.iter().max().cloned().unwrap_or(0) + 1;
+        if biggest <= target_size {
+            cups.insert(*initial.last().unwrap(), biggest);
+            for i in biggest..target_size {
+                cups.insert(i, i + 1);
+            }
+            cups.insert(target_size, current.clone());
+        } else {
+            cups.insert(initial.last().unwrap().clone(), current);
+        }
+        Game { cups, current }
+    }
 
-        let destination = found.unwrap().clone();
-        let mut before = rest.split_off(destination + 1);
-        rest.append(&mut circle);
-        rest.append(&mut before);
-        self.cups = rest;
+    fn perform(&mut self) {
+        let len = self.cups.len();
+        let cup = self.current.clone();
+        let next_three = self.next(&self.current, 3);
+
+        let target = [1, 2, 3, 4]
+            .iter()
+            .map(move |d| if d >= &cup { len - (d - cup) } else { cup - d })
+            .filter(|i| !next_three.contains(i))
+            .next()
+            .unwrap();
+
+        let stitch = self.cups[&next_three[2]];
+
+        // println!("current: {:?}", self.current);
+        // println!("pick up: {:?}", next_three);
+        // println!("destination: {:?}", target);
+        // println!("stitch: {:?}", stitch);
+        self.cups.insert(self.current.clone(), stitch);
+
+        let insert_before = self.cups[&target];
+        self.cups.insert(next_three[2], insert_before);
+        self.cups.insert(target, next_three[0]);
+
+        self.current = stitch;
+    }
+
+    fn next(&self, from: &usize, take: usize) -> Vec<usize> {
+        let mut cursor = from.clone();
+        let mut out = vec![];
+        for _ in 0..take {
+            cursor = self.cups[&cursor];
+            out.push(cursor);
+        }
+        out
     }
 
     fn circle(&self) -> String {
-        let mut circle = self.cups.clone();
-        for _ in 0..9 {
-            if let Some(1) = circle.front() {
-                break;
-            }
-            circle.rotate_left(1);
-        }
-        circle.iter().skip(1).map(|i| i.to_string()).collect()
+        self.next(&self.current, self.cups.len())
+            .iter()
+            .map(|i| i.to_string())
+            .collect()
     }
 }
 
@@ -77,20 +113,25 @@ mod tests {
     #[test]
     fn test_parse() {
         let input = "389125467";
-        let mut game: Game = input.parse().unwrap();
-        assert_eq!(game.cups, vec![3, 8, 9, 1, 2, 5, 4, 6, 7]);
-        assert_eq!(game.circle(), "25467389");
+        let mut game = Game::new(string_to_vec(input).unwrap(), 9);
+
+        assert_eq!(game.circle(), "891254673");
         game.perform();
-        assert_eq!(game.circle(), "54673289");
         game.perform();
-        assert_eq!(game.circle(), "32546789");
+        assert_eq!(game.circle(), "467891325");
         for _ in 3..=10 {
             game.perform();
         }
-        assert_eq!(game.circle(), "92658374");
-        for _ in 11..=100 {
+        assert_eq!(game.circle(), "374192658");
+
+        let mut game = Game::new(string_to_vec(input).unwrap(), 1_000_000);
+
+        for _ in 1..=10_000_000 {
             game.perform();
         }
-        assert_eq!(game.circle(), "67384529");
+        assert_eq!(game.next(&1, 2), vec![934001, 159792]);
+        // In the above example (389125467), this would be 934001 and
+        // then 159792; multiplying these together produces
+        // 149245887792.
     }
 }
